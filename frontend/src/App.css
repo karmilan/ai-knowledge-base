@@ -44,6 +44,32 @@
   font-weight: 600;
 }
 
+.document-list {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: #faf7ff;
+}
+
+.document-list h2 {
+  font-size: 1rem;
+  margin: 0 0 8px;
+}
+
+.document-list ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.document-list li {
+  margin-bottom: 6px;
+}
+
+.empty-state {
+  color: var(--text);
+  font-size: 0.95rem;
+}
+
 .message-list {
   display: flex;
   flex-direction: column;

@@ -5,13 +5,11 @@ from types import SimpleNamespace
 from app import app as app_module
 
 
-class ResumePathTests(unittest.TestCase):
-    def test_resume_path_is_resolved_from_the_app_directory(self):
-        resume_path = app_module.get_resume_path()
+class UploadOnlyBehaviorTests(unittest.TestCase):
+    def test_ask_returns_upload_prompt_before_any_document_is_loaded(self):
+        response = app_module.ask_question(app_module.AskRequest(question="What is in the document?"))
 
-        self.assertTrue(resume_path.exists(), msg=f"Expected resume file at {resume_path}")
-        self.assertEqual(resume_path.parent.name, "data")
-        self.assertEqual(resume_path.suffix.lower(), ".pdf")
+        self.assertEqual(response["response"], "Please upload a PDF first so I can answer questions from it.")
 
 
 class ResponseFormattingTests(unittest.TestCase):

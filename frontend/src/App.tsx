@@ -1,4 +1,5 @@
-import { FormEvent, useState } from 'react'
+import type { FormEvent } from 'react'
+import { useState } from 'react'
 import './App.css'
 
 type Message = {
@@ -10,11 +11,60 @@ function App() {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'assistant',
-      content: 'Ask me anything about the uploaded document and I will answer from the indexed content.',
+      content: 'Upload a PDF and then ask questions about it.',
     },
   ])
   const [question, setQuestion] = useState('')
   const [loading, setLoading] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [uploadedDocs, setUploadedDocs] = useState<string[]>([])
+
+  async function handleUpload(event: FormEvent) {
+    event.preventDefault()
+    if (!selectedFile) {
+      return
+    }
+
+    setUploading(true)
+    const formData = new FormData()
+    formData.append('file', selectedFile)
+
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/upload`, {
+        method: 'POST',
+        body: formData,
+      })
+
+      const data = await response.json()
+      if (data.filename) {
+        setUploadedDocs((current) => {
+          if (current.includes(data.filename)) {
+            return current
+          }
+          return [...current, data.filename]
+        })
+      }
+      setMessages((current) => [
+        ...current,
+        {
+          role: 'assistant',
+          content: data.message || 'Upload complete.',
+        },
+      ])
+      setSelectedFile(null)
+    } catch (error) {
+      setMessages((current) => [
+        ...current,
+        {
+          role: 'assistant',
+          content: error instanceof Error ? error.message : 'Upload failed.',
+        },
+      ])
+    } finally {
+      setUploading(false)
+    }
+  }
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault()
@@ -70,6 +120,19 @@ function App() {
           <span className="status-pill">Live</span>
         </header>
 
+        <section className="document-list" aria-label="Uploaded documents">
+          <h2>Uploaded documents</h2>
+          {uploadedDocs.length === 0 ? (
+            <p className="empty-state">No documents uploaded yet.</p>
+          ) : (
+            <ul>
+              {uploadedDocs.map((doc) => (
+                <li key={doc}>{doc}</li>
+              ))}
+            </ul>
+          )}
+        </section>
+
         <div className="message-list" role="log" aria-live="polite">
           {messages.map((message, index) => (
             <article key={`${message.role}-${index}`} className={`message ${message.role}`}>
@@ -84,6 +147,17 @@ function App() {
             </article>
           )}
         </div>
+
+        <form className="composer" onSubmit={handleUpload}>
+          <input
+            type="file"
+            accept="application/pdf"
+            onChange={(event) => setSelectedFile(event.target.files?.[0] || null)}
+          />
+          <button type="submit" disabled={uploading || !selectedFile}>
+            {uploading ? 'Uploading…' : 'Upload PDF'}
+          </button>
+        </form>
 
         <form className="composer" onSubmit={handleSubmit}>
           <textarea

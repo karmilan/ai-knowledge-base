@@ -3,7 +3,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from langchain_community.document_loaders import PyPDFLoader
@@ -16,6 +16,7 @@ from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
 import pandas as pd
 import tempfile
+from typing import List
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import START, MessagesState, StateGraph
 
@@ -30,13 +31,6 @@ app.add_middleware(
 )
 
 
-def get_resume_path() -> Path:
-    return (Path(__file__).resolve().parent / "data" / "Karmilan_Software_Engineer_Resume.pdf").resolve()
-
-
-loader = PyPDFLoader(str(get_resume_path()))
-pdf_pages = loader.load()
-
 all_minilm_embeddings = HuggingFaceEmbeddings(
     model_name="all-MiniLM-L6-v2",
 )
@@ -45,15 +39,23 @@ text_splitter = RecursiveCharacterTextSplitter(
     chunk_size=1000,
     chunk_overlap=200
 )
-chunked_doc = text_splitter.split_documents(pdf_pages)
 
 persistent_directory = tempfile.mkdtemp(prefix="chroma_db_")
 
-vectordb = Chroma.from_documents(
-    documents=chunked_doc,
-    embedding=all_minilm_embeddings,
-    persist_directory=persistent_directory,
-)
+vectordb = None
+indexed_document_name = None
+
+
+def build_vector_store_from_pdf(path: Path):
+    loader = PyPDFLoader(str(path))
+    pdf_pages = loader.load()
+    chunked_doc = text_splitter.split_documents(pdf_pages)
+
+    return Chroma.from_documents(
+        documents=chunked_doc,
+        embedding=all_minilm_embeddings,
+        persist_directory=persistent_directory,
+    )
 
 
 # Groq
@@ -104,6 +106,11 @@ class AskRequest(BaseModel):
     session_id: str = "default"
 
 
+class UploadResponse(BaseModel):
+    message: str
+    filename: str
+
+
 def extract_message_text(response: dict) -> str:
     messages = response.get("messages", [])
     if not messages:
@@ -117,8 +124,29 @@ def extract_message_text(response: dict) -> str:
     return "I could not generate a response."
 
 
+@app.post("/upload", response_model=UploadResponse)
+async def upload_document(file: UploadFile = File(...)):
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        return UploadResponse(message="Please upload a PDF file.", filename=file.filename or "")
+
+    upload_dir = Path(__file__).resolve().parent / "data" / "uploads"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    temp_path = upload_dir / file.filename
+    with temp_path.open("wb") as buffer:
+        buffer.write(await file.read())
+
+    global vectordb, indexed_document_name
+    vectordb = build_vector_store_from_pdf(temp_path)
+    indexed_document_name = file.filename
+
+    return UploadResponse(message="Document uploaded and indexed successfully.", filename=file.filename)
+
+
 @app.post("/ask")
 def ask_question(request: AskRequest):
+    if vectordb is None or indexed_document_name is None:
+        return {"response": "Please upload a PDF first so I can answer questions from it."}
+
     question = request.question
     docs = vectordb.similarity_search_with_score(question, k=2)
 
