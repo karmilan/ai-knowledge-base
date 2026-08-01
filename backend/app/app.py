@@ -4,6 +4,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -19,6 +20,15 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import START, MessagesState, StateGraph
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 def get_resume_path() -> Path:
     return (Path(__file__).resolve().parent / "data" / "Karmilan_Software_Engineer_Resume.pdf").resolve()
@@ -94,6 +104,18 @@ class AskRequest(BaseModel):
     session_id: str = "default"
 
 
+def extract_message_text(response: dict) -> str:
+    messages = response.get("messages", [])
+    if not messages:
+        return "I could not generate a response."
+
+    for message in reversed(messages):
+        content = getattr(message, "content", None)
+        if isinstance(content, str) and content.strip():
+            return content.strip()
+
+    return "I could not generate a response."
+
 
 @app.post("/ask")
 def ask_question(request: AskRequest):
@@ -123,5 +145,7 @@ def ask_question(request: AskRequest):
         {"messages": human_message},
         config={"configurable": {"thread_id": request.session_id}},
     )
-    
-    return {"response": response}
+
+    return {
+        "response": extract_message_text(response),
+    }
