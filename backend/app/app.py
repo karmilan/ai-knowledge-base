@@ -1,23 +1,21 @@
 import sys
 from pathlib import Path
-import shutil
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-# from annotated_types import doc
 from fastapi import FastAPI
+from pydantic import BaseModel
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from config import settings
 import os
-import numpy as np
 from langchain_groq import ChatGroq
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langchain_core.messages import SystemMessage, HumanMessage
 import pandas as pd
 import tempfile
-from langgraph.checkpoint.memory import InMemorySaver, MemorySaver
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import START, MessagesState, StateGraph
 
 app = FastAPI()
@@ -32,9 +30,6 @@ pdf_pages = loader.load()
 all_minilm_embeddings = HuggingFaceEmbeddings(
     model_name="all-MiniLM-L6-v2",
 )
-# multilingual_embedding = HuggingFaceEmbeddings(
-#     model_name="intfloat/multilingual-e5-large",
-# )
 
 text_splitter = RecursiveCharacterTextSplitter(
     chunk_size=1000,
@@ -52,19 +47,12 @@ vectordb = Chroma.from_documents(
 
 
 # Groq
+
 if "GROQ_API_KEY" not in os.environ:
     os.environ["GROQ_API_KEY"] = settings.groq_api_key
 
-llm = ChatGroq(
-    model="llama-3.1-8b-instant",
-    temperature=0,
-    max_tokens=250,
-    # reasoning_format="parsed",
-)
-
-# print(llm.invoke("write apoem about jaffna"))
-
 # Initialize the ChatGroq model
+
 def get_chat_model():
     """Caches the ChatGroq model."""
     return ChatGroq(
@@ -101,10 +89,15 @@ def get_langgraph_app():
 
 compiled_workflow = get_langgraph_app()
 
+class AskRequest(BaseModel):
+    question: str
+    session_id: str = "default"
+
 
 
 @app.post("/ask")
-def ask_question(question: str):
+def ask_question(request: AskRequest):
+    question = request.question
     docs = vectordb.similarity_search_with_score(question, k=2)
 
     _docs = pd.DataFrame(
@@ -122,8 +115,13 @@ def ask_question(question: str):
 
     context = "\n\n".join(_docs['paragraph'])
 
-    human_message = [HumanMessage(content=context + question)]
+    human_message = [
+        HumanMessage(content=f"Context:\n{context}\n\nQuestion:\n{question}")
+    ]
 
-    response = compiled_workflow.invoke({"messages": human_message}, config={"configurable": {"thread_id": "1"}})
-
+    response = compiled_workflow.invoke(
+        {"messages": human_message},
+        config={"configurable": {"thread_id": request.session_id}},
+    )
+    
     return {"response": response}
